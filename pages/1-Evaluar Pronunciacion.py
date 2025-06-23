@@ -9,7 +9,7 @@ import difflib
 st.set_page_config(page_title="Pronunciación Inglés", page_icon="🗣️", layout="centered")
 
 st.title("🗣️ Práctica de Pronunciación en Inglés")
-st.markdown("Escucha la frase, repítela en voz alta y evalúa tu pronunciación.")
+st.markdown("Escucha la frase, repítela en voz alta, grábala con tu celular o PC, súbela y evalúa tu pronunciación.")
 
 # Lista de frases
 frases = [
@@ -37,21 +37,20 @@ def reproducir_texto(texto, idioma="en"):
         st.error(f"❌ Error al generar audio: {str(e)}")
         return None
 
-# Función para capturar voz en inglés
-def capturar_voz_en():
+# Función para capturar voz desde archivo de audio
+def capturar_voz_desde_archivo(archivo_audio):
     r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎙️ Repite la frase... (grabando 5 segundos)")
-        try:
-            audio = r.listen(source, timeout=5, phrase_time_limit=5)
+    try:
+        with sr.AudioFile(archivo_audio) as source:
+            audio = r.record(source)
             texto = r.recognize_google(audio, language="en-US")
             return texto
-        except sr.WaitTimeoutError:
-            st.warning("⏱️ Tiempo agotado.")
-        except sr.UnknownValueError:
-            st.warning("⚠️ No se entendió lo que dijiste.")
-        except Exception as e:
-            st.error(f"❌ Error al procesar audio: {str(e)}")
+    except sr.UnknownValueError:
+        st.warning("⚠️ No se entendió el audio.")
+    except sr.RequestError:
+        st.error("❌ Error al contactar el servicio de reconocimiento.")
+    except Exception as e:
+        st.error(f"❌ Error al procesar audio: {str(e)}")
     return None
 
 # Función para comparar palabra por palabra
@@ -88,13 +87,16 @@ if st.button("🔄 Cambiar frase"):
     st.session_state.frase_actual = random.choice(frases)
     st.rerun()
 
-# Botón para grabar voz y evaluar
-if st.button("🎤 Repetir frase y evaluar"):
-    with st.spinner("🎧 Escuchando..."):
-        texto_usuario = capturar_voz_en()
+# Subir archivo de audio
+st.markdown("## 🎤 Sube tu grabación de la frase")
+archivo_audio = st.file_uploader("Elige un archivo de audio (.wav o .mp3)", type=["wav", "mp3"])
+
+if archivo_audio is not None:
+    with st.spinner("🎧 Analizando tu pronunciación..."):
+        texto_usuario = capturar_voz_desde_archivo(archivo_audio)
 
     if texto_usuario:
-        st.markdown(f"**🗣 Lo que dijiste:** \"{texto_usuario}\"")
+        st.markdown(f"**🗣 Lo que se entendió:** \"{texto_usuario}\"")
 
         # Reproducir lo que el sistema entendió
         audio_usuario = reproducir_texto(texto_usuario)
@@ -122,4 +124,3 @@ if st.button("🎤 Repetir frase y evaluar"):
             st.warning("🟡 Aceptable, pero puedes mejorar.")
         else:
             st.error("❌ Necesitas más práctica.")
-
