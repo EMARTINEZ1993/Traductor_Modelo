@@ -90,15 +90,16 @@ if st.button("🔄 Cambiar frase"):
 
 # Micrófono del navegador con streamlit-webrtc
 st.markdown("## 🎤 Graba tu voz (usa el micrófono)")
+
 ctx = webrtc_streamer(
     key="mic",
     mode="SENDRECV",
     in_audio_enabled=True,
     out_audio_enabled=False,
     audio_processor_factory=AudioProcessor,
-    media_stream_constraints={"audio": True, "video": False},
-    async_processing=True,
+    media_stream_constraints={"audio": True, "video": False}
 )
+
 
 # Botón para procesar audio grabado
 if ctx.audio_processor and st.button("🧠 Evaluar pronunciación"):
