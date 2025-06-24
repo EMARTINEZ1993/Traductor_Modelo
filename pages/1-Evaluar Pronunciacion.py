@@ -4,12 +4,16 @@ from gtts import gTTS
 from io import BytesIO
 import random
 import difflib
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+import av
+import numpy as np
+import tempfile
 
 # Configurar página
 st.set_page_config(page_title="Pronunciación Inglés", page_icon="🗣️", layout="centered")
 
-st.title("🗣️ Práctica de Pronunciación en Inglés")
-st.markdown("Escucha la frase, repítela en voz alta, grábala con tu celular o PC, súbela y evalúa tu pronunciación.")
+st.title("🗣️ Práctica de Pronunciación en Inglés con Micrófono")
+st.markdown("Escucha la frase, repítela en voz alta y evalúa tu pronunciación.")
 
 # Lista de frases
 frases = [
@@ -37,21 +41,18 @@ def reproducir_texto(texto, idioma="en"):
         st.error(f"❌ Error al generar audio: {str(e)}")
         return None
 
-# Función para capturar voz desde archivo de audio
-def capturar_voz_desde_archivo(archivo_audio):
-    r = sr.Recognizer()
-    try:
-        with sr.AudioFile(archivo_audio) as source:
-            audio = r.record(source)
-            texto = r.recognize_google(audio, language="en-US")
-            return texto
-    except sr.UnknownValueError:
-        st.warning("⚠️ No se entendió el audio.")
-    except sr.RequestError:
-        st.error("❌ Error al contactar el servicio de reconocimiento.")
-    except Exception as e:
-        st.error(f"❌ Error al procesar audio: {str(e)}")
-    return None
+# AudioProcessor personalizado para grabar audio del navegador
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.buffer = []
+
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        pcm = frame.to_ndarray().flatten().astype(np.int16)
+        self.buffer.append(pcm.tobytes())
+        return frame
+
+    def get_audio_bytes(self):
+        return b"".join(self.buffer)
 
 # Función para comparar palabra por palabra
 def comparar_palabras(original, hablado):
@@ -87,40 +88,62 @@ if st.button("🔄 Cambiar frase"):
     st.session_state.frase_actual = random.choice(frases)
     st.rerun()
 
-# Subir archivo de audio
-st.markdown("## 🎤 Sube tu grabación de la frase")
-archivo_audio = st.file_uploader("Elige un archivo de audio (.wav o .mp3)", type=["wav", "mp3"])
+# Micrófono del navegador con streamlit-webrtc
+st.markdown("## 🎤 Graba tu voz (usa el micrófono)")
+ctx = webrtc_streamer(
+    key="mic",
+    mode="SENDRECV",
+    in_audio_enabled=True,
+    out_audio_enabled=False,
+    audio_processor_factory=AudioProcessor,
+    media_stream_constraints={"audio": True, "video": False},
+    async_processing=True,
+)
 
-if archivo_audio is not None:
-    with st.spinner("🎧 Analizando tu pronunciación..."):
-        texto_usuario = capturar_voz_desde_archivo(archivo_audio)
+# Botón para procesar audio grabado
+if ctx.audio_processor and st.button("🧠 Evaluar pronunciación"):
+    audio_bytes = ctx.audio_processor.get_audio_bytes()
+    if audio_bytes:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            audio_path = f.name
 
-    if texto_usuario:
-        st.markdown(f"**🗣 Lo que se entendió:** \"{texto_usuario}\"")
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(audio_path) as source:
+            audio = recognizer.record(source)
+            try:
+                texto_usuario = recognizer.recognize_google(audio, language="en-US")
+                st.markdown(f"**🗣 Lo que dijiste:** \"{texto_usuario}\"")
 
-        # Reproducir lo que el sistema entendió
-        audio_usuario = reproducir_texto(texto_usuario)
-        if audio_usuario:
-            st.markdown("🔁 Tu pronunciación (lo que se entendió):")
-            st.audio(audio_usuario, format="audio/mp3")
+                # Reproducir lo que el sistema entendió
+                audio_usuario = reproducir_texto(texto_usuario)
+                if audio_usuario:
+                    st.markdown("🔁 Tu pronunciación (lo que se entendió):")
+                    st.audio(audio_usuario, format="audio/mp3")
 
-        # Comparación palabra por palabra
-        st.markdown("🔍 **Evaluación palabra por palabra:**")
-        resultado = comparar_palabras(st.session_state.frase_actual, texto_usuario)
+                # Comparar y evaluar
+                st.markdown("🔍 **Evaluación palabra por palabra:**")
+                resultado = comparar_palabras(st.session_state.frase_actual, texto_usuario)
 
-        for estado, palabra in resultado:
-            color = "green" if estado == "✅" else "red"
-            st.markdown(f"<span style='color:{color}'>{estado} {palabra}</span>", unsafe_allow_html=True)
+                for estado, palabra in resultado:
+                    color = "green" if estado == "✅" else "red"
+                    st.markdown(f"<span style='color:{color}'>{estado} {palabra}</span>", unsafe_allow_html=True)
 
-        # Porcentaje general
-        aciertos = sum(1 for estado, _ in resultado if estado == "✅")
-        total = len(resultado)
-        porcentaje = round((aciertos / total) * 100, 2) if total > 0 else 0
-        st.markdown(f"📊 **Coincidencia general:** {porcentaje}%")
+                # Porcentaje general
+                aciertos = sum(1 for estado, _ in resultado if estado == "✅")
+                total = len(resultado)
+                porcentaje = round((aciertos / total) * 100, 2) if total > 0 else 0
+                st.markdown(f"📊 **Coincidencia general:** {porcentaje}%")
 
-        if porcentaje >= 85:
-            st.success("🎉 ¡Excelente pronunciación!")
-        elif porcentaje >= 60:
-            st.warning("🟡 Aceptable, pero puedes mejorar.")
-        else:
-            st.error("❌ Necesitas más práctica.")
+                if porcentaje >= 85:
+                    st.success("🎉 ¡Excelente pronunciación!")
+                elif porcentaje >= 60:
+                    st.warning("🟡 Aceptable, pero puedes mejorar.")
+                else:
+                    st.error("❌ Necesitas más práctica.")
+            except sr.UnknownValueError:
+                st.warning("⚠️ No se entendió lo que dijiste.")
+            except Exception as e:
+                st.error(f"❌ Error al procesar el audio: {str(e)}")
+    else:
+        st.warning("⏺️ Aún no se ha grabado audio.")
